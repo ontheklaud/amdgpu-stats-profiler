@@ -107,10 +107,25 @@ def get_amdsmi_data():
                 
                 try:
                     from amdsmi import AmdSmiTemperatureType, AmdSmiTemperatureMetric
-                    temp_result = amdsmi.amdsmi_get_temp_metric(handle, 
-                                                              AmdSmiTemperatureType.EDGE, 
-                                                              AmdSmiTemperatureMetric.CURRENT)
-                    gpu_info['temp'] = safe_float(temp_result / 1000.0) if temp_result else None
+                    temp_types = [
+                        AmdSmiTemperatureType.EDGE,
+                        AmdSmiTemperatureType.HOTSPOT,
+                        AmdSmiTemperatureType.JUNCTION
+                    ]
+                    
+                    for temp_type in temp_types:
+                        try:
+                            temp_result = amdsmi.amdsmi_get_temp_metric(handle, temp_type, AmdSmiTemperatureMetric.CURRENT)
+                            if temp_result is not None:
+                                temp_celsius = float(temp_result)
+                                if temp_celsius > 200:  # Likely millidegrees
+                                    temp_celsius = temp_celsius / 1000.0
+                                if temp_celsius > 0:
+                                    gpu_info['temp'] = temp_celsius
+                                    debug_print(f"AMD SMI GPU {i}: Temperature from {temp_type}: {temp_celsius}°C")
+                                    break
+                        except:
+                            continue
                 except:
                     gpu_info['temp'] = None
                 
@@ -125,11 +140,25 @@ def get_amdsmi_data():
                     gpu_info['energy'] = safe_int(energy.get('energy_accumulator') or 
                                                 energy.get('power') or 
                                                 energy.get('counter'))
+                    gpu_info['energy_resolution'] = safe_float(energy.get('counter_resolution', 15.259))
                 except:
                     gpu_info['energy'] = None
+                    gpu_info['energy_resolution'] = 15.259
                 
-                gpu_info['sclk'] = None
-                gpu_info['mclk'] = None
+                # Clock frequencies using proper API
+                try:
+                    from amdsmi import AmdSmiClkType
+                    sys_clk = amdsmi.amdsmi_get_clock_info(handle, AmdSmiClkType.GFX)
+                    gpu_info['sclk'] = safe_float(sys_clk.get('clk'))
+                except:
+                    gpu_info['sclk'] = None
+                
+                try:
+                    from amdsmi import AmdSmiClkType
+                    mem_clk = amdsmi.amdsmi_get_clock_info(handle, AmdSmiClkType.MEM)
+                    gpu_info['mclk'] = safe_float(mem_clk.get('clk'))
+                except:
+                    gpu_info['mclk'] = None
             
             # VRAM usage (separate API call)
             try:
@@ -210,9 +239,7 @@ def get_gpu_data():
     
     if USE_ROCMSMI and check_rocmsmi():
         rocmsmi_data = get_rocmsmi_data()
-        # Only add ROCm-SMI data if we don't have AMD SMI data
-        if not all_data:
-            all_data.extend(rocmsmi_data)
+        all_data.extend(rocmsmi_data)  # Always add ROCm-SMI data for comparison
     
     return all_data
 
@@ -252,6 +279,39 @@ def save_to_file(gpu_list, filename):
     except Exception as e:
         debug_print(f"Error saving to file: {e}")
 
+def calculate_energy_diff(initial_metrics, final_metrics):
+    """Calculate energy consumption difference with proper resolution"""
+    total_energy_wh = 0.0
+    
+    # Create lookup for final metrics
+    final_lookup = {}
+    for gpu in final_metrics:
+        if gpu.get('method') == 'amdsmi' or gpu.get('method') == 'rocmsmi':
+            final_lookup[gpu['gpu_id']] = gpu
+    
+    for initial in initial_metrics:
+        final = final_lookup.get(initial['gpu_id'])
+        
+        if (final and 
+            initial.get('energy') is not None and 
+            final.get('energy') is not None and
+            final['energy'] >= initial['energy']):
+            
+            # Calculate energy delta
+            delta_ticks = final['energy'] - initial['energy']
+            
+            # Use proper resolution
+            resolution = initial.get('energy_resolution', 15.259)
+            delta_uj = delta_ticks * resolution
+            
+            # Convert to Watt-hours (1 Wh = 3,600,000,000 uJ)
+            energy_wh = delta_uj / 3_600_000_000
+            total_energy_wh += energy_wh
+            
+            debug_print(f"GPU {initial['gpu_id']}: {delta_ticks} ticks × {resolution} uJ = {energy_wh:.6f} Wh")
+    
+    return total_energy_wh
+
 def calculate_total_power(gpu_list):
     """Calculate total system power"""
     total = 0
@@ -265,8 +325,6 @@ def calculate_total_power(gpu_list):
             methods.add(gpu.get('method', 'unknown'))
     
     return total, count, methods
-
-def simple_stats(filename):
     """Calculate simple statistics from saved data"""
     try:
         with open(filename, 'r') as f:
@@ -332,9 +390,11 @@ def monitor_loop(save_data=False):
     print("Press Ctrl+C to stop\n")
     
     filename = None
+    initial_gpu_list = None
     if save_data:
         filename = f"gpu_data_dual_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
         print(f"Saving data to: {filename}")
+        initial_gpu_list = get_gpu_data()  # Get initial data for energy calculation
     
     try:
         while True:
@@ -357,6 +417,12 @@ def monitor_loop(save_data=False):
         print("\nMonitoring stopped.")
         
         if save_data and filename:
+            # Calculate energy consumption
+            final_gpu_list = get_gpu_data()
+            if initial_gpu_list and final_gpu_list:
+                energy_wh = calculate_energy_diff(initial_gpu_list, final_gpu_list)
+                print(f"\nEnergy Consumption: {energy_wh:.6f} Wh")
+            
             simple_stats(filename)
 
 def main():
@@ -376,8 +442,11 @@ def main():
     if '--rocmsmi-only' in sys.argv:
         USE_AMDSMI = False
         USE_ROCMSMI = True
+    if '--dual' in sys.argv:
+        USE_AMDSMI = True
+        USE_ROCMSMI = True
     
-    print("=== Dual API GPU Monitor (B.5 + AMD SMI) ===")
+    print("=== Dual API GPU Monitor ===")
     print(f"AMD SMI: {'Enabled' if USE_AMDSMI else 'Disabled'}")
     print(f"ROCm-SMI: {'Enabled' if USE_ROCMSMI else 'Disabled'}")
     if DEBUG:

@@ -275,8 +275,32 @@ class AMDGPUMonitor:
                 metrics.temperature_celsius = self._safe_float(gpu_data.get('Temperature (Sensor junction) (C)'))
                 metrics.utilization_percent = self._safe_float(gpu_data.get('GPU use (%)'))
                 metrics.vram_usage_percent = self._safe_float(gpu_data.get('GPU Memory Allocated (VRAM%)'))
+                
+                # Clock frequencies - try multiple field names
+                # Method 1: Try standard field names
                 metrics.sclk_mhz = self._safe_float(gpu_data.get('current_gfxclk (MHz)'))
                 metrics.mclk_mhz = self._safe_float(gpu_data.get('current_uclk (MHz)'))
+                
+                # Method 2: Try clock speed fields (parse from string format)
+                if metrics.sclk_mhz is None:
+                    sclk_speed = gpu_data.get('sclk clock speed:')
+                    if sclk_speed and isinstance(sclk_speed, str):
+                        # Parse "(131Mhz)" format
+                        import re
+                        match = re.search(r'\((\d+)Mhz\)', sclk_speed)
+                        if match:
+                            metrics.sclk_mhz = float(match.group(1))
+                            debug_print(f"rocm-smi GPU {gpu_id}: SCLK from speed field: {metrics.sclk_mhz}MHz")
+                
+                if metrics.mclk_mhz is None:
+                    mclk_speed = gpu_data.get('mclk clock speed:')
+                    if mclk_speed and isinstance(mclk_speed, str):
+                        # Parse "(900Mhz)" format
+                        import re
+                        match = re.search(r'\((\d+)Mhz\)', mclk_speed)
+                        if match:
+                            metrics.mclk_mhz = float(match.group(1))
+                            debug_print(f"rocm-smi GPU {gpu_id}: MCLK from speed field: {metrics.mclk_mhz}MHz")
                 
                 # Energy counter parsing - improved based on actual rocm-smi output
                 energy_found = False

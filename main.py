@@ -113,46 +113,49 @@ class AMDGPUMonitor:
                     gpu_metrics = amdsmi.amdsmi_get_gpu_metrics_info(handle)
                     debug_print(f"amdsmi GPU {i}: Full metrics: {gpu_metrics}")
                     
-                    # Temperature - use temperature_edge from gpu_metrics_info
-                    if 'temperature_edge' in gpu_metrics and gpu_metrics['temperature_edge'] is not None:
-                        metrics.temperature_celsius = float(gpu_metrics['temperature_edge'])
-                        debug_print(f"amdsmi GPU {i}: Edge Temperature: {metrics.temperature_celsius}°C")
-                    elif 'temperature_hotspot' in gpu_metrics and gpu_metrics['temperature_hotspot'] is not None:
+                    # Temperature - use temperature_hotspot from gpu_metrics_info (edge often N/A)
+                    if 'temperature_hotspot' in gpu_metrics and gpu_metrics['temperature_hotspot'] is not None and gpu_metrics['temperature_hotspot'] != 'N/A':
                         metrics.temperature_celsius = float(gpu_metrics['temperature_hotspot'])
                         debug_print(f"amdsmi GPU {i}: Hotspot Temperature: {metrics.temperature_celsius}°C")
+                    elif 'temperature_edge' in gpu_metrics and gpu_metrics['temperature_edge'] is not None and gpu_metrics['temperature_edge'] != 'N/A':
+                        metrics.temperature_celsius = float(gpu_metrics['temperature_edge'])
+                        debug_print(f"amdsmi GPU {i}: Edge Temperature: {metrics.temperature_celsius}°C")
+                    elif 'temperature_mem' in gpu_metrics and gpu_metrics['temperature_mem'] is not None and gpu_metrics['temperature_mem'] != 'N/A':
+                        metrics.temperature_celsius = float(gpu_metrics['temperature_mem'])
+                        debug_print(f"amdsmi GPU {i}: Memory Temperature: {metrics.temperature_celsius}°C")
                     
-                    # Power - use average_socket_power from gpu_metrics_info
-                    if 'average_socket_power' in gpu_metrics and gpu_metrics['average_socket_power'] is not None:
-                        metrics.power_watts = float(gpu_metrics['average_socket_power'])
-                        debug_print(f"amdsmi GPU {i}: Average Socket Power: {metrics.power_watts}W")
-                    elif 'current_socket_power' in gpu_metrics and gpu_metrics['current_socket_power'] is not None:
+                    # Power - use current_socket_power from gpu_metrics_info (average often N/A)
+                    if 'current_socket_power' in gpu_metrics and gpu_metrics['current_socket_power'] is not None and gpu_metrics['current_socket_power'] != 'N/A':
                         metrics.power_watts = float(gpu_metrics['current_socket_power'])
                         debug_print(f"amdsmi GPU {i}: Current Socket Power: {metrics.power_watts}W")
+                    elif 'average_socket_power' in gpu_metrics and gpu_metrics['average_socket_power'] is not None and gpu_metrics['average_socket_power'] != 'N/A':
+                        metrics.power_watts = float(gpu_metrics['average_socket_power'])
+                        debug_print(f"amdsmi GPU {i}: Average Socket Power: {metrics.power_watts}W")
                     
                     # GPU Activity - use average_gfx_activity from gpu_metrics_info
                     if 'average_gfx_activity' in gpu_metrics and gpu_metrics['average_gfx_activity'] is not None:
                         metrics.utilization_percent = float(gpu_metrics['average_gfx_activity'])
                         debug_print(f"amdsmi GPU {i}: GFX Activity: {metrics.utilization_percent}%")
                     
-                    # Clock frequencies
-                    if 'average_gfxclk_frequency' in gpu_metrics and gpu_metrics['average_gfxclk_frequency'] is not None:
-                        metrics.sclk_mhz = float(gpu_metrics['average_gfxclk_frequency'])
-                        debug_print(f"amdsmi GPU {i}: Average GFXCLK: {metrics.sclk_mhz}MHz")
-                    elif 'current_gfxclk' in gpu_metrics and gpu_metrics['current_gfxclk'] is not None:
+                    # Clock frequencies - use current values (average often N/A)
+                    if 'current_gfxclk' in gpu_metrics and gpu_metrics['current_gfxclk'] is not None and gpu_metrics['current_gfxclk'] != 'N/A':
                         metrics.sclk_mhz = float(gpu_metrics['current_gfxclk'])
                         debug_print(f"amdsmi GPU {i}: Current GFXCLK: {metrics.sclk_mhz}MHz")
+                    elif 'average_gfxclk_frequency' in gpu_metrics and gpu_metrics['average_gfxclk_frequency'] is not None and gpu_metrics['average_gfxclk_frequency'] != 'N/A':
+                        metrics.sclk_mhz = float(gpu_metrics['average_gfxclk_frequency'])
+                        debug_print(f"amdsmi GPU {i}: Average GFXCLK: {metrics.sclk_mhz}MHz")
                     
-                    if 'average_uclk_frequency' in gpu_metrics and gpu_metrics['average_uclk_frequency'] is not None:
-                        metrics.mclk_mhz = float(gpu_metrics['average_uclk_frequency'])
-                        debug_print(f"amdsmi GPU {i}: Average UCLK: {metrics.mclk_mhz}MHz")
-                    elif 'current_uclk' in gpu_metrics and gpu_metrics['current_uclk'] is not None:
+                    if 'current_uclk' in gpu_metrics and gpu_metrics['current_uclk'] is not None and gpu_metrics['current_uclk'] != 'N/A':
                         metrics.mclk_mhz = float(gpu_metrics['current_uclk'])
                         debug_print(f"amdsmi GPU {i}: Current UCLK: {metrics.mclk_mhz}MHz")
+                    elif 'average_uclk_frequency' in gpu_metrics and gpu_metrics['average_uclk_frequency'] is not None and gpu_metrics['average_uclk_frequency'] != 'N/A':
+                        metrics.mclk_mhz = float(gpu_metrics['average_uclk_frequency'])
+                        debug_print(f"amdsmi GPU {i}: Average UCLK: {metrics.mclk_mhz}MHz")
                     
                     # Energy accumulator from gpu_metrics_info
-                    if 'energy_accumulator' in gpu_metrics and gpu_metrics['energy_accumulator'] is not None:
+                    if 'energy_accumulator' in gpu_metrics and gpu_metrics['energy_accumulator'] is not None and gpu_metrics['energy_accumulator'] != 'N/A':
                         metrics.energy_accumulator = int(gpu_metrics['energy_accumulator'])
-                        # According to API doc: energy_accumulator with 15.3 uJ resolution over 1ns
+                        # According to debug output: counter_resolution is 15.3 uJ
                         metrics.counter_resolution = 15.3
                         debug_print(f"amdsmi GPU {i}: Energy Accumulator: {metrics.energy_accumulator} (15.3 uJ resolution)")
                     
@@ -187,9 +190,10 @@ class AMDGPUMonitor:
                     # Fallback: Power using individual power API
                     try:
                         power_info = amdsmi.amdsmi_get_power_info(handle)
+                        # Use current_socket_power first (more reliable than average)
                         power_val = (power_info.get("current_socket_power") or 
                                     power_info.get("average_socket_power"))
-                        if power_val is not None:
+                        if power_val is not None and power_val != 'N/A':
                             metrics.power_watts = float(power_val)
                             debug_print(f"amdsmi GPU {i}: Power (fallback): {metrics.power_watts}W")
                     except Exception as e:
@@ -205,18 +209,41 @@ class AMDGPUMonitor:
                     except Exception as e:
                         debug_print(f"amdsmi GPU {i}: Activity fallback failed: {e}")
                     
-                    # Fallback: Energy counter using individual energy API
+                    # Fallback: Clock frequencies using individual clock API
+                    if metrics.sclk_mhz is None:
+                        try:
+                            from amdsmi import AmdSmiClkType
+                            clock_info = amdsmi.amdsmi_get_clock_info(handle, AmdSmiClkType.GFX)
+                            if clock_info and 'clk' in clock_info:
+                                metrics.sclk_mhz = float(clock_info['clk'])
+                                debug_print(f"amdsmi GPU {i}: SCLK (fallback): {metrics.sclk_mhz}MHz")
+                        except Exception as e:
+                            debug_print(f"amdsmi GPU {i}: SCLK fallback failed: {e}")
+                    
+                    if metrics.mclk_mhz is None:
+                        try:
+                            from amdsmi import AmdSmiClkType
+                            clock_info = amdsmi.amdsmi_get_clock_info(handle, AmdSmiClkType.MEM)
+                            if clock_info and 'clk' in clock_info:
+                                metrics.mclk_mhz = float(clock_info['clk'])
+                                debug_print(f"amdsmi GPU {i}: MCLK (fallback): {metrics.mclk_mhz}MHz")
+                        except Exception as e:
+                            debug_print(f"amdsmi GPU {i}: MCLK fallback failed: {e}")
                     try:
                         energy = amdsmi.amdsmi_get_energy_count(handle)
-                        # Try both new and old field names
-                        energy_val = (energy.get("energy_accumulator") or 
-                                    energy.get("power") or 
+                        # From debug output: 'power' field contains the energy accumulator
+                        energy_val = (energy.get("power") or 
+                                    energy.get("energy_accumulator") or 
                                     energy.get("counter"))
-                        if energy_val is not None:
+                        if energy_val is not None and energy_val != 'N/A':
                             metrics.energy_accumulator = int(energy_val)
                         
-                        resolution = energy.get("counter_resolution", 15.259)  # Default from API
-                        metrics.counter_resolution = float(resolution)
+                        # Use actual resolution from API
+                        resolution = energy.get("counter_resolution")
+                        if resolution is not None and resolution != 'N/A':
+                            metrics.counter_resolution = float(resolution)
+                        else:
+                            metrics.counter_resolution = 15.3  # Default based on debug output
                         debug_print(f"amdsmi GPU {i}: Energy (fallback): {metrics.energy_accumulator}, resolution: {metrics.counter_resolution}")
                     except Exception as e:
                         debug_print(f"amdsmi GPU {i}: Energy fallback failed: {e}")

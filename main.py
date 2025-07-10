@@ -177,10 +177,15 @@ class AMDGPUMonitor:
                             try:
                                 temp_result = amdsmi.amdsmi_get_temp_metric(handle, temp_type, AmdSmiTemperatureMetric.CURRENT)
                                 if temp_result is not None:
-                                    temp_celsius = float(temp_result) / 1000.0  # Convert from millidegrees
+                                    # AMD SMI temperature conversion: check if it's in millidegrees
+                                    if temp_result > 1000:  # Likely millidegrees (>1000 = >1°C)
+                                        temp_celsius = float(temp_result) / 1000.0
+                                    else:
+                                        temp_celsius = float(temp_result)
+                                    
                                     if temp_celsius > 0:
                                         metrics.temperature_celsius = temp_celsius
-                                        debug_print(f"amdsmi GPU {i}: Temperature (fallback): {temp_celsius}°C from {temp_type}")
+                                        debug_print(f"amdsmi GPU {i}: Temperature (fallback): {temp_celsius}°C from {temp_type} (raw: {temp_result})")
                                         break
                             except Exception:
                                 continue
